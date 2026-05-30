@@ -1,40 +1,55 @@
 import { NextResponse } from "next/server";
-import Flutterwave from "flutterwave-node-v3";
-
-const flw = new Flutterwave(
-  process.env.FLW_PUBLIC_KEY!,
-  process.env.FLW_SECRET_KEY!
-);
 
 export async function POST(req: Request) {
-  const { email, userId } = await req.json();
-
-  const tx_ref = `${userId}-${Date.now()}`;
-
-  const payload = {
-    tx_ref,
-    amount: 5,
-    currency: "USD",
-    redirect_url: "http://localhost:3000/tool",
-    customer: {
-      email,
-    },
-    customizations: {
-      title: "Falcon X Pro",
-      description: "Unlimited AI generations",
-    },
-  };
-
   try {
-    const response = await flw.Charge.initiate(payload);
+    const { email, userId } = await req.json();
+
+    const tx_ref = `${userId}-${Date.now()}`;
+
+    const payload = {
+      tx_ref,
+      amount: 5,
+      currency: "USD",
+      redirect_url: `${process.env.NEXT_PUBLIC_BASE_URL}/tool`,
+      customer: {
+        email,
+      },
+      customizations: {
+        title: "Falcon X Pro",
+        description: "Unlimited AI generations",
+      },
+    };
+
+    const response = await fetch(
+      "https://api.flutterwave.com/v3/payments",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: data.message || "Payment init failed" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
-      url: response.data.link,
+      url: data.data.link,
       tx_ref,
     });
   } catch (err: any) {
+    console.error(err);
+
     return NextResponse.json(
-      { error: err.message },
+      { error: "Server error starting payment" },
       { status: 500 }
     );
   }
