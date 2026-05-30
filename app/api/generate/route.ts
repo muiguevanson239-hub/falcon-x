@@ -8,7 +8,25 @@ const supabase = createClient(
 
 export async function POST(req: Request) {
   try {
-    const { topic, platform, tone, userId } = await req.json();
+    const body = await req.json();
+    const { topic, platform, tone, userId } = body;
+
+    // -----------------------------
+    // VALIDATION (IMPORTANT FIX)
+    // -----------------------------
+    if (!topic || !platform || !tone) {
+      return NextResponse.json(
+        { error: "Missing required fields" },
+        { status: 400 }
+      );
+    }
+
+    if (!process.env.GROQ_API_KEY) {
+      return NextResponse.json(
+        { error: "Server misconfigured: missing GROQ_API_KEY" },
+        { status: 500 }
+      );
+    }
 
     // -----------------------------
     // GROQ AI REQUEST
@@ -27,7 +45,7 @@ export async function POST(req: Request) {
             {
               role: "system",
               content:
-                "You are a viral social media expert who writes high engagement posts.",
+                "You are a world-class viral content creator. Write engaging, high-conversion social media posts.",
             },
             {
               role: "user",
@@ -39,18 +57,40 @@ export async function POST(req: Request) {
       }
     );
 
+    // -----------------------------
+    // HANDLE GROQ FAILURES
+    // -----------------------------
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("GROQ ERROR:", errorText);
+
+      return NextResponse.json(
+        {
+          error: "Groq API failed",
+          debug: errorText,
+        },
+        { status: 500 }
+      );
+    }
+
     const data = await response.json();
+
     const output = data?.choices?.[0]?.message?.content;
 
     if (!output) {
+      console.error("EMPTY AI RESPONSE:", data);
+
       return NextResponse.json(
-        { error: "AI generation failed" },
+        {
+          error: "AI returned empty response",
+          debug: data,
+        },
         { status: 500 }
       );
     }
 
     // -----------------------------
-    // UPDATE USER USAGE
+    // UPDATE USER USAGE (SAFE)
     // -----------------------------
     if (userId) {
       const { data: profile } = await supabase
@@ -68,7 +108,7 @@ export async function POST(req: Request) {
     }
 
     // -----------------------------
-    // UPDATE GLOBAL STATS
+    // UPDATE GLOBAL ANALYTICS
     // -----------------------------
     const { data: stats } = await supabase
       .from("stats")
@@ -83,13 +123,21 @@ export async function POST(req: Request) {
       total_referrals: stats?.total_referrals || 0,
     });
 
+    // -----------------------------
+    // SUCCESS RESPONSE
+    // -----------------------------
     return NextResponse.json({
       result: output,
     });
-  } catch (err) {
-    console.error(err);
+
+  } catch (err: any) {
+    console.error("GENERATION CRASH:", err);
+
     return NextResponse.json(
-      { error: "Server error" },
+      {
+        error: "Server crash",
+        debug: err?.message || err,
+      },
       { status: 500 }
     );
   }
