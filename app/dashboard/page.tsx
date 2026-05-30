@@ -3,70 +3,95 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-export default function DashboardPage() {
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function Dashboard() {
+  const [stats, setStats] = useState<any>(null);
+  const [users, setUsers] = useState<any[]>([]);
 
   useEffect(() => {
-    loadGenerations();
+    const load = async () => {
+      // GLOBAL STATS
+      const { data: globalStats } = await supabase
+        .from("stats")
+        .select("*")
+        .eq("id", "global")
+        .single();
+
+      setStats(globalStats);
+
+      // USERS (simple preview)
+      const { data: userData } = await supabase
+        .from("profiles")
+        .select("id, created_at, usage, credits, referral_count")
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      setUsers(userData || []);
+    };
+
+    load();
   }, []);
 
-  async function loadGenerations() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    const { data } = await supabase
-      .from("generations")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-
-    setItems(data || []);
-    setLoading(false);
-  }
-
   return (
-    <div className="min-h-screen bg-black text-white p-8">
-      <h1 className="text-4xl font-bold mb-8 text-yellow-400">
-        Falcon X Dashboard
+    <div className="min-h-screen bg-black text-white p-6">
+
+      <h1 className="text-3xl font-bold text-yellow-400">
+        Falcon X Analytics
       </h1>
 
-      {loading && <p>Loading...</p>}
+      {/* STATS CARDS */}
+      {stats && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
 
-      {!loading && items.length === 0 && (
-        <p>No generations yet.</p>
+          <div className="bg-gray-900 p-4 rounded">
+            <p className="text-gray-400">Total Generations</p>
+            <p className="text-green-400 text-2xl font-bold">
+              {stats.total_generations}
+            </p>
+          </div>
+
+          <div className="bg-gray-900 p-4 rounded">
+            <p className="text-gray-400">Total Users (approx)</p>
+            <p className="text-blue-400 text-2xl font-bold">
+              {users.length}
+            </p>
+          </div>
+
+          <div className="bg-gray-900 p-4 rounded">
+            <p className="text-gray-400">Total Referrals</p>
+            <p className="text-yellow-400 text-2xl font-bold">
+              {stats.total_referrals}
+            </p>
+          </div>
+
+        </div>
       )}
 
-      <div className="space-y-6">
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className="bg-gray-900 p-5 rounded-xl border border-gray-800"
-          >
-            <div className="mb-3">
-              <strong>Topic:</strong> {item.topic}
-            </div>
+      {/* USER TABLE */}
+      <div className="mt-10">
+        <h2 className="text-xl font-bold mb-3">
+          Recent Users
+        </h2>
 
-            <div className="mb-3">
-              <strong>Platform:</strong> {item.platform}
-            </div>
+        <div className="space-y-2">
+          {users.map((u) => (
+            <div
+              key={u.id}
+              className="bg-gray-900 p-3 rounded text-sm flex justify-between"
+            >
+              <span className="text-gray-300">{u.id.slice(0, 8)}...</span>
 
-            <div className="mb-3">
-              <strong>Tone:</strong> {item.tone}
-            </div>
+              <span className="text-green-400">
+                usage: {u.usage || 0}
+              </span>
 
-            <pre className="whitespace-pre-wrap text-sm">
-              {item.result}
-            </pre>
-          </div>
-        ))}
+              <span className="text-blue-400">
+                refs: {u.referral_count || 0}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
+
     </div>
   );
 }

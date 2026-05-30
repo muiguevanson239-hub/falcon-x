@@ -11,16 +11,14 @@ export async function POST(req: Request) {
       amount: 5,
       currency: "USD",
       redirect_url: `${process.env.NEXT_PUBLIC_BASE_URL}/tool`,
-      customer: {
-        email,
-      },
+      customer: { email },
       customizations: {
-        title: "Falcon X Pro",
-        description: "Unlimited AI generations",
+        title: "Falcon X Pro Subscription",
+        description: "Unlimited AI access plan",
       },
     };
 
-    const response = await fetch(
+    const res = await fetch(
       "https://api.flutterwave.com/v3/payments",
       {
         method: "POST",
@@ -32,24 +30,19 @@ export async function POST(req: Request) {
       }
     );
 
-    const data = await response.json();
+    const data = await res.json();
 
-    if (!response.ok) {
+    if (!res.ok) {
       return NextResponse.json(
-        { error: data.message || "Payment init failed" },
+        { error: data.message },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({
-      url: data.data.link,
-      tx_ref,
-    });
-  } catch (err: any) {
-    console.error(err);
-
+    return NextResponse.json({ url: data.data.link });
+  } catch (err) {
     return NextResponse.json(
-      { error: "Server error starting payment" },
+      { error: "Payment init failed" },
       { status: 500 }
     );
   }
