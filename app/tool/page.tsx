@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 
 export default function ToolPage() {
+  const router = useRouter();
+
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
 
@@ -12,21 +17,25 @@ export default function ToolPage() {
   const [platform, setPlatform] = useState("Instagram");
   const [tone, setTone] = useState("professional");
 
-  const [result, setResult] = useState("");
   const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState("");
 
   const [usage, setUsage] = useState(0);
   const [credits, setCredits] = useState(0);
 
-  // -----------------------------
-  // INIT USER + PROFILE
-  // -----------------------------
+  const [history, setHistory] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     const init = async () => {
-      const { data } = await supabase.auth.getUser();
-      const currentUser = data.user;
+      const {
+        data: { user: currentUser },
+      } = await supabase.auth.getUser();
 
-      if (!currentUser) return;
+      if (!currentUser) {
+        router.push("/login");
+        return;
+      }
 
       setUser(currentUser);
 
@@ -42,62 +51,57 @@ export default function ToolPage() {
         setCredits(prof.credits || 0);
       }
 
-      // -----------------------------
-      // SAFE REFERRAL SYSTEM (NO DUPES)
-      // -----------------------------
-      const urlParams = new URLSearchParams(window.location.search);
-      const ref = urlParams.get("ref");
+      // Referral System
+      const params = new URLSearchParams(window.location.search);
+      const ref = params.get("ref");
 
-      if (ref && currentUser && !prof?.referred_by) {
-        // mark referral
-        await supabase
-          .from("profiles")
-          .update({ referred_by: ref })
-          .eq("id", currentUser.id);
-
-        // reward new user
+      if (ref && prof && !prof.referred_by && ref !== currentUser.id) {
         await supabase
           .from("profiles")
           .update({
-            credits: (prof?.credits || 0) + 3,
+            referred_by: ref,
+            credits: (prof.credits || 0) + 3,
           })
           .eq("id", currentUser.id);
 
-        // reward referrer
-        const { data: refUser } = await supabase
+        const { data: referrer } = await supabase
           .from("profiles")
           .select("credits, referral_count")
           .eq("id", ref)
           .single();
 
-        if (refUser) {
+        if (referrer) {
           await supabase
             .from("profiles")
             .update({
-              credits: (refUser.credits || 0) + 5,
-              referral_count: (refUser.referral_count || 0) + 1,
+              credits: (referrer.credits || 0) + 5,
+              referral_count: (referrer.referral_count || 0) + 1,
             })
             .eq("id", ref);
         }
       }
+
+      setCheckingAuth(false);
     };
 
     init();
-  }, []);
+  }, [router]);
 
-  // -----------------------------
-  // AI GENERATION (GROQ BACKEND)
-  // -----------------------------
   const generate = async () => {
-    if (!user) return alert("Please login first");
+    if (!topic.trim()) {
+      alert("Please enter a topic");
+      return;
+    }
 
     setLoading(true);
     setResult("");
 
     try {
-      const res = await fetch("/api/generate", {
+      const response = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           topic,
           platform,
@@ -106,9 +110,9 @@ export default function ToolPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await response.json();
 
-      if (!res.ok || data.error) {
+      if (!response.ok || data.error) {
         alert(data.error || "Generation failed");
         setLoading(false);
         return;
@@ -116,16 +120,21 @@ export default function ToolPage() {
 
       setResult(data.result);
 
-      // -----------------------------
-      // UPDATE LOCAL USAGE + REWARD LOOP
-      // -----------------------------
-      const newUsage = usage + 1;
-      setUsage(newUsage);
+      setHistory((prev) => [
+        data.result,
+        ...prev.slice(0, 9),
+      ]);
 
+      const newUsage = usage + 1;
       let bonus = 0;
-      if (newUsage % 5 === 0) bonus = 2;
+
+      if (newUsage % 5 === 0) {
+        bonus = 2;
+      }
 
       const newCredits = credits + bonus;
+
+      setUsage(newUsage);
       setCredits(newCredits);
 
       await supabase
@@ -144,18 +153,15 @@ export default function ToolPage() {
     setLoading(false);
   };
 
-  // -----------------------------
-  // VIRAL SHARE SYSTEM
-  // -----------------------------
-  const share = () => {
+  const share = async () => {
     const link = `https://falcon-x-six.vercel.app?ref=${user.id}`;
 
-    navigator.clipboard.writeText(link);
+    await navigator.clipboard.writeText(link);
 
     if (navigator.share) {
-      navigator.share({
+      await navigator.share({
         title: "Falcon X",
-        text: "Generate viral AI content instantly",
+        text: "Generate viral content instantly with AI",
         url: link,
       });
     } else {
@@ -163,79 +169,133 @@ export default function ToolPage() {
     }
   };
 
-  // -----------------------------
-  // UI
-  // -----------------------------
+  const logout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
+
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-yellow-400">
+            Falcon X
+          </h1>
+          <p className="text-gray-500 mt-2">
+            Loading...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-black text-white p-6">
 
-      {/* HEADER */}
+      {/* Header */}
       <div className="flex justify-between items-center">
+
         <h1 className="text-3xl font-bold text-yellow-400">
           Falcon X
         </h1>
 
-        <Link href="/" className="px-3 py-2 bg-gray-800 rounded">
-          Home
-        </Link>
-      </div>
+        <div className="flex gap-2">
 
-      {/* USER INFO */}
-      {user && (
-        <div className="mt-4 text-sm text-gray-400 space-y-1">
-          <p>
-            Logged in:{" "}
-            <span className="text-white">{user.email}</span>
-          </p>
+          <Link
+            href="/"
+            className="bg-gray-800 px-4 py-2 rounded"
+          >
+            Home
+          </Link>
 
-          <p>
-            Usage:{" "}
-            <span className="text-green-400">{usage}</span>
-          </p>
-
-          <p>
-            Credits:{" "}
-            <span className="text-yellow-400">{credits}</span>
-          </p>
-        </div>
-      )}
-
-      {/* REFERRAL BOX */}
-      {user && (
-        <div className="mt-4 p-4 bg-gray-900 rounded border border-gray-800">
-
-          <p className="text-sm text-gray-400">
-            Your referral link:
-          </p>
-
-          <p className="text-green-400 break-all">
-            {`https://falcon-x-six.vercel.app?ref=${user.id}`}
-          </p>
+          <Link
+            href="/dashboard"
+            className="bg-yellow-500 text-black px-4 py-2 rounded font-bold"
+          >
+            Dashboard
+          </Link>
 
           <button
-            onClick={share}
-            className="mt-3 bg-green-500 text-black px-4 py-2 rounded font-bold"
+            onClick={logout}
+            className="bg-red-500 px-4 py-2 rounded"
           >
-            🚀 Share & Earn Credits
+            Logout
           </button>
 
         </div>
+      </div>
+
+      {/* Profile */}
+      <div className="mt-6 bg-gray-900 border border-gray-800 rounded-xl p-4">
+
+        <p>
+          Logged in as:
+          <span className="text-yellow-400 ml-2">
+            {user?.email}
+          </span>
+        </p>
+
+        <div className="flex gap-6 mt-3">
+
+          <p>
+            Usage:
+            <span className="text-green-400 ml-2">
+              {usage}
+            </span>
+          </p>
+
+          <p>
+            Credits:
+            <span className="text-yellow-400 ml-2">
+              {credits}
+            </span>
+          </p>
+
+        </div>
+
+      </div>
+
+      {/* Credits Warning */}
+      {credits <= 3 && (
+        <div className="mt-4 bg-yellow-900 border border-yellow-500 p-4 rounded-xl">
+          ⚠️ Low credits. Invite friends to earn more.
+        </div>
       )}
 
-      {/* INPUTS */}
-      <div className="mt-6 space-y-3 max-w-xl">
+      {/* Referral */}
+      <div className="mt-6 bg-gray-900 border border-gray-800 rounded-xl p-4">
+
+        <h2 className="text-lg font-bold text-green-400">
+          Referral Program
+        </h2>
+
+        <p className="text-sm text-gray-400 mt-2 break-all">
+          https://falcon-x-six.vercel.app?ref={user?.id}
+        </p>
+
+        <button
+          onClick={share}
+          className="mt-3 bg-green-500 text-black px-4 py-2 rounded font-bold"
+        >
+          🚀 Share & Earn Credits
+        </button>
+
+      </div>
+
+      {/* Generator */}
+      <div className="mt-8 max-w-2xl space-y-4">
 
         <input
-          className="w-full p-3 bg-gray-900 rounded"
-          placeholder="Enter topic (e.g fashion)"
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
+          placeholder="Enter your topic..."
+          className="w-full p-4 bg-gray-900 rounded-xl"
         />
 
         <select
-          className="w-full p-3 bg-gray-900 rounded"
           value={platform}
           onChange={(e) => setPlatform(e.target.value)}
+          className="w-full p-4 bg-gray-900 rounded-xl"
         >
           <option>Instagram</option>
           <option>TikTok</option>
@@ -244,45 +304,85 @@ export default function ToolPage() {
         </select>
 
         <select
-          className="w-full p-3 bg-gray-900 rounded"
           value={tone}
           onChange={(e) => setTone(e.target.value)}
+          className="w-full p-4 bg-gray-900 rounded-xl"
         >
           <option>professional</option>
           <option>viral</option>
-          <option>funny</option>
           <option>luxury</option>
+          <option>funny</option>
         </select>
 
         <button
           onClick={generate}
           disabled={loading}
-          className="bg-yellow-500 text-black px-4 py-3 rounded w-full font-bold"
+          className="w-full bg-yellow-500 text-black py-4 rounded-xl font-bold"
         >
           {loading ? "Generating..." : "Generate Content"}
         </button>
 
       </div>
 
-      {/* OUTPUT */}
+      {/* Result */}
       {result && (
-        <div className="mt-8 bg-gray-900 p-5 rounded-xl border border-gray-800">
-          <h2 className="text-yellow-400 font-bold mb-2">
-            Output
-          </h2>
+        <div className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-5">
+
+          <div className="flex justify-between items-center mb-4">
+
+            <h2 className="text-yellow-400 font-bold">
+              Generated Content
+            </h2>
+
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(result);
+                setCopied(true);
+
+                setTimeout(() => {
+                  setCopied(false);
+                }, 2000);
+              }}
+              className="bg-green-500 text-black px-3 py-2 rounded"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+
+          </div>
 
           <pre className="whitespace-pre-wrap text-sm">
             {result}
           </pre>
+
         </div>
       )}
 
-      {/* EMPTY STATE */}
-      {!result && !loading && (
-        <p className="text-gray-600 mt-10 text-center">
-          Generate your first viral post 🚀
-        </p>
+      {/* History */}
+      {history.length > 0 && (
+        <div className="mt-10">
+
+          <h2 className="text-xl font-bold text-yellow-400 mb-4">
+            Recent Generations
+          </h2>
+
+          <div className="space-y-3">
+
+            {history.map((item, index) => (
+              <div
+                key={index}
+                className="bg-gray-900 border border-gray-800 p-4 rounded-xl"
+              >
+                <p className="text-sm line-clamp-4">
+                  {item}
+                </p>
+              </div>
+            ))}
+
+          </div>
+
+        </div>
       )}
+
     </div>
   );
 }
